@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><span>Virtual Hands</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://kit.fontawesome.com/f4e85f5208.js" crossorigin="anonymous"></script>
+</head>
+<body>
+ <div id="header">
+      <div class="container">
+        <nav>
+
+            <img src="images/logo.PNG" class="logo">
+            <ul id="sidemenu">
+
+                <li><a href="#header">Home</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#portfolio">Portfolio</a></li>
+                <li><a href="#contact">Contact</a></li>
+                <i class="fa-solid fa-xmark" onclick="closemenu()"></i>
+            </ul>
+            <i class="fa-solid fa-bars" onclick="openmenu()"></i>
+        </nav>
+        <div class="header-text">
+            <p>Virtual Assistant</p>
+            <h1>Making life <span>easier</span> for you.</h1>
+        </div>
+      </div>
+ </div>   
+ <!-- ------------about------------ -->
+<div id="about">
+    <div class="container">
+        <div class="row">
+            <div class="about-col-1">
+                <img src="images/Ritalee.jpg" alt="">
+            </div>
+            <div class="about-col-2">
+                <h1 class="sub-title">About Me</h1>
+                <p>Dedicated, passionate, sympathetic, and meticulous person who takes initiative and ensures quality outcomes. I work hard to give executives and business owners effective administrative support so they may improve their performance, reduce their workload, and become more productive in their many pursuits while ensuring the delivery of high-quality services. The idea that every customer should be treated as though they were the first and only client inspires me enormously.</p>
+
+                    <div class="tab-titles">
+                        <p class="tab-links active-link" onclick="opentab('skills')">Skills</p>
+                        <p class="tab-links" onclick="opentab('experience')">Experience</p>
+                        <p class="tab-links" onclick="opentab('education')">Education</p>
+                    </div>
+                    <div class="tab-contents active-tab" id="skills">
+                        <ul>
+                            <li><span>Email Support</span><br>Helping executives and business owners manage your email</li>
+                            <li><span>Travel Booking and Research</span><br>Helping you research and book your travel</li>
+                            <li><span>Project Management</span><br>Assist you with planning and executing your projects </li>
+                            <li><span>Data entry & expense tracking</span><br>Sorting, organizing your data and creating expense reports </li>
+                            <li><span>Scheduling and Internet research</span><br> </li>
+                            <li><span>Creating meeting agendas</span><br> </li>
+
+                        </ul>
+                    </div>
+                    <div class="tab-contents" id="experience">
+                        <ul>
+                            <li><span> Aug 2022 -Current</span><br>Virtual Assistant (Freelancer)</li>
+                            <li><span>Jan 2019 - Sept 2021</span><br>Customer Service Representative at Econet Wireless</li>
+                            <li><span>Jan 2018 -Dec 2018</span><br>Customer Service Agent (Freelancer) at Econet Wireless </li>
+                        </ul>
+                    </div>
+                    <div class="tab-contents" id="education">
+                        <ul>
+                            <li><span>2022</span><br>Virtual Assistant Course at ALX</li>
+                            <li><span>2022</span><br>Master of Science in IT Project Management at Warsaw School of Computer Science</li>
+                            <li><span>2021</span><br>Information Systems, Auditing, Control and Assurance at Hong Kong University of Science and Technology </li>
+                            <li><span>2017</span><br>Bsc in Public Health at National Univeristy Of Science and Technology</li>
+                        </ul>
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ---------------services------------------ -->
+<div id="services">
+    <div class="container">
+        <h1 class="sub-title">My Services</h1>
+        <div class="services-list">
+        
+            <div>
+                <i class="fa-solid fa-headset"></i>
+                <h2>Virtual Assistance</h2>
+                <p>Need someone you can rely on to assist you with your travel and booking arrangements, scheduling, document formatting, managing your email and calendar or getting ready for your upcoming presentation? I am your person</p>
+                <a href="#">Learn more</a>
+            </div>
+            <div>
+                <i class="fa-solid fa-code"></i>
+                <h2>Web Design</h2>
+                <p>We'll collaborate to create an individual online home for your company that amply conveys the distinctive value you provide through innovative strategy and thoughtful design! To accurately express your vision and objective, we will carry out all of your demands and minute details.</p>
+                <a href="#">Learn more</a>
+            </div>
+            <div>
+                <i class="fa-solid fa-computer"></i>
+                <h2>Tech Support</h2>
+                <p>Are you prepared to research automating your processes? Don't know how to create visuals and documents that are appealing and well-designed? Or perhaps you have a brilliant concept for your upcoming show or presentation but are having problems using the technology you require to make it happen? Let me help!</p>
+                <a href="#">Learn more</a>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- -------------portfolio------------- -->
+<div id="portfolio">
+    <div class="container">
+        <h1 class="sub-title">My Work</h1>
+        <div class="work-list">
+            <div class="work">
+                <img src="images/work-1.jpg">
+                <div class="layer">
+                    <h3>Beautiful Scenery</h3>
+                    <p>A place where you can enjoy your holiday with your family.Check the link below for more information</p>
+                    <a href="#"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                </div>
+            </div>
+            <div class="work">
+                <img src="images/work-4.jpg">
+                <div class="layer">
+                    <h3>Holiday Resort Centre</h3>
+                    <p>A perfect place for walking and all sorts of outdoor activities. Hit the link below to book your space</p>
+                    <a href="#"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                </div>
+            </div>
+            <div class="work">
+                <img src="images/work-5.jpg">
+                <div class="layer">
+                    <h3>Moon Watchind</h3>
+                    <p>The best place to relax and look at the moon, enjoy storytelling. Book your place on the link below</p>
+                    <a href="#"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                </div>
+            </div>
+        </div>
+         <a href="#" class="btn">See more</a>
+    </div>
+</div>
+<!-- -----------contact-------------- -->
+<div id="contact">
+    <div class="container">
+        <div class="row">
+            <div class="contact-left">
+                <h1 class="sub-title">Contact Me</h1>
+                <p><i class="fa-solid fa-paper-plane"></i>pamsmonde@gmail.com</p>
+                <p><i class="fa-solid fa-square-phone"></i>+48600704218</p>
+                <div class="social-icons">
+                    <a href="https://www.facebook.com/rita.pamela/"><i class="fa-brands fa-facebook"></i></a>
+                    <a href=""><i class="fa-brands fa-twitter"></i></a>
+                    <a href=""><i class="fa-brands fa-instagram"></i></a>
+                    <a href="https://www.linkedin.com/in/ritalee-pamela-monde-990816142/"><i class="fa-brands fa-linkedin"></i></a>
+                </div>
+                <a href="images/Ritalee Monde-Resume VA.pdf" download class="btn btn2">Download CV</a>
+            </div>
+            <div class="contact-right">
+                <form name="submit-to-google-sheet">
+                   <input type="text" name="Name" placeholder="Your Name" required>
+                   <input type="email" name="Email" placeholder="Your Email" required>
+                   <textarea name="Message"  rows="6" placeholder="Your Message"></textarea>
+                   <button type="submit" class="btn btn2">Submit</button>
+                </form>
+                <span id="msg"></span>
+            </div> 
+        </div>
+    </div>
+    <div class="copyright">
+        <p>Copyright ⓒ Ritalee. Made with <i class="fa-solid fa-heart"></i> by Virtual Hands</p> 
+    </div>
+</div>
+
+
+
+
+
+
+
+<script>
+
+    var tablinks = document.getElementsByClassName("tab-links");
+    var tabcontents = document.getElementsByClassName("tab-contents");
+
+    
+    function opentab(tabname){
+        for(tablink of tablinks){
+            tablink.classList.remove("active-link");
+        }
+        for(tabcontent of tabcontents){
+            tabcontent.classList.remove("active-tab");
+
+        }
+        event.currentTarget.classList.add("active-link");
+        document.getElementById(tabname).classList.add("active-tab")
+    }
+</script>
+<script>
+    var sidemenu = document.getElementById("sidemenu")
+
+    function openmenu(){
+        sidemenu.style.right="0";
+    }
+    function closemenu(){
+        sidemenu.style.right="-200px";
+    }
+</script>
+<script>
+    const scriptURL = 'https://script.google.com/macros/s/AKfycbxsM778pxJsibPpOB3BmyUn797X9X8b6WdFWSzZLwn-59HIAp_2Sd0lg-QFfh_oXQ_5/exec'
+    const form = document.forms['submit-to-google-sheet']
+    const msg =document.getElementById("msg")
+  
+    form.addEventListener('submit', e => {
+      e.preventDefault()
+      fetch(scriptURL, { method: 'POST', body: new FormData(form)})
+        .then(response => {
+            msg.innerHTML = "Message sent successfully"
+            setTimeout(function(){
+                msg.innerHTML = ""
+            },5000)
+            form.reset()
+        })
+        .catch(error => console.error('Error!', error.message))
+    })
+  </script>
+</body>
+</html>
