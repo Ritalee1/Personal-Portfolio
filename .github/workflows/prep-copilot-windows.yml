@@ -1,0 +1,29 @@
+name: Prep Copilot - Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["copilot-v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: prep-copilot/apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: prep-copilot/apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run dist:win
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prep-copilot-windows-installer
+          path: prep-copilot/apps/desktop/release/*.exe
