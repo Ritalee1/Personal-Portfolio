@@ -28,7 +28,14 @@ Run one question at a time. When the candidate answers:
 If there is no answer yet, briefly introduce yourself and ask the first question.
 Format: "**Feedback:** ...\\n**Score:** x/10\\n\\n**Next question:** ..." (omit feedback and score for the first question).`;
 
-const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
+// Created on first use, so a missing key shows up as a readable error on the item
+// instead of crashing the whole function at startup.
+let anthropic: Anthropic | null = null;
+function getAnthropic(): Anthropic {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set. Add it under Edge Functions > Secrets in Supabase.");
+  return (anthropic ??= new Anthropic({ apiKey }));
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -39,7 +46,7 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
 async function askClaude(system: string, messages: Anthropic.Beta.BetaMessageParam[]): Promise<string> {
-  const response = await anthropic.beta.messages.create({
+  const response = await getAnthropic().beta.messages.create({
     model: MODEL,
     max_tokens: 16000,
     thinking: { type: "adaptive" },
@@ -63,25 +70,26 @@ async function explain(db: SupabaseClient, itemId: string) {
   const { data: item, error } = await db.from("items").select("*").eq("id", itemId).single();
   if (error || !item) return json({ error: "Item not found" }, 404);
 
-  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
-  if (item.image_path) {
-    const { data: file, error: dlError } = await db.storage.from("captures").download(item.image_path);
-    if (dlError || !file) return json({ error: "Could not load image" }, 500);
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    const mediaType = item.image_path.endsWith(".jpg") ? "image/jpeg" : "image/png";
-    content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(binary) } });
-  }
-  content.push({ type: "text", text: item.prompt?.trim() || "Explain this so I can learn how to solve it." });
-
   try {
+    const content: Anthropic.Beta.BetaContentBlockParam[] = [];
+    if (item.image_path) {
+      const { data: file, error: dlError } = await db.storage.from("captures").download(item.image_path);
+      if (dlError || !file) throw new Error(`Could not load the image: ${dlError?.message ?? "not found"}`);
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const mediaType = item.image_path.endsWith(".jpg") ? "image/jpeg" : "image/png";
+      content.push({ type: "image", source: { type: "base64", media_type: mediaType, data: btoa(binary) } });
+    }
+    content.push({ type: "text", text: item.prompt?.trim() || "Explain this so I can learn how to solve it." });
+
     const answer = await askClaude(EXPLAIN_SYSTEM, [{ role: "user", content }]);
     await db.from("items").update({ answer, status: "done" }).eq("id", itemId);
     return json({ answer });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await db.from("items").update({ answer: message, status: "error" }).eq("id", itemId);
+    console.error("explain failed:", message);
+    await db.from("items").update({ answer: `Error: ${message}`, status: "error" }).eq("id", itemId);
     return json({ error: message }, 502);
   }
 }
@@ -106,6 +114,7 @@ async function mock(db: SupabaseClient, sessionId: string, answer?: string) {
     await db.from("mock_sessions").update({ messages: history, updated_at: new Date().toISOString() }).eq("id", sessionId);
     return json({ reply });
   } catch (e) {
+    console.error("mock failed:", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
 }
@@ -114,15 +123,26 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
-  // Act as the signed-in user so row-level security applies to every query.
-  const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
-  });
-  const { data: auth } = await db.auth.getUser();
-  if (!auth.user) return json({ error: "Not signed in" }, 401);
+  try {
+    // Act as the signed-in user so row-level security applies to every query.
+    // The app sends its public key in the "apikey" header; fall back to the project's default.
+    const publicKey = req.headers.get("apikey") ?? Deno.env.get("SUPABASE_ANON_KEY");
+    if (!publicKey) return json({ error: "Missing Supabase public key" }, 500);
+    const db = createClient(Deno.env.get("SUPABASE_URL")!, publicKey, {
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+    const { data: auth, error: authError } = await db.auth.getUser();
+    if (!auth.user) {
+      console.error("auth failed:", authError?.message);
+      return json({ error: "Not signed in" }, 401);
+    }
 
-  const body = await req.json().catch(() => ({}));
-  if (body.type === "explain" && body.item_id) return explain(db, body.item_id);
-  if (body.type === "mock" && body.session_id) return mock(db, body.session_id, body.answer);
-  return json({ error: "Unknown request" }, 400);
+    const body = await req.json().catch(() => ({}));
+    if (body.type === "explain" && body.item_id) return await explain(db, body.item_id);
+    if (body.type === "mock" && body.session_id) return await mock(db, body.session_id, body.answer);
+    return json({ error: "Unknown request" }, 400);
+  } catch (e) {
+    console.error("coach crashed:", e);
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
 });
