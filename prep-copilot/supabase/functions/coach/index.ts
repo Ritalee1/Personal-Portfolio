@@ -1,11 +1,12 @@
 // Supabase Edge Function: the shared "brain" for the desktop and mobile apps.
 // The Anthropic API key lives only here (as a function secret), never on a device.
 //
-//   POST { type: "explain", item_id }            -> explains a captured study item
-//   POST { type: "mock", session_id, answer? }   -> mock interviewer: feedback + next question
+//   POST { type: "explain", item_id }             -> explains a captured study item
+//   POST { type: "mock", session_id, answer? }    -> mock interviewer: feedback + next question
+//   POST { type: "audio_qa", prompt }             -> lightning-fast real-time prompt/audio Q&A
 //
-// Deploy:  supabase functions deploy coach
-// Secret:  supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+// Deploy:   supabase functions deploy coach
+// Secret:   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 
 import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -26,7 +27,9 @@ Run one question at a time. When the candidate answers:
 2. Score the answer out of 10.
 3. Ask the next question, mixing behavioural, situational and role-specific technical questions.
 If there is no answer yet, briefly introduce yourself and ask the first question.
-Format: "**Feedback:** ...\\n**Score:** x/10\\n\\n**Next question:** ..." (omit feedback and score for the first question).`;
+Format: "**Feedback:** ...\n**Score:** x/10\n\n**Next question:** ..." (omit feedback and score for the first question).`;
+
+const AUDIO_QA_SYSTEM = `You are a lightning-fast technical and interview copilot. Answer the user's question instantly with precise, concise, and structured bullet points optimized for quick reading or text-to-speech.`;
 
 // Created on first use, so a missing key shows up as a readable error on the item
 // instead of crashing the whole function at startup.
@@ -119,6 +122,17 @@ async function mock(db: SupabaseClient, sessionId: string, answer?: string) {
   }
 }
 
+async function audioQa(db: SupabaseClient, prompt: string) {
+  try {
+    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
+    const reply = await askClaude(AUDIO_QA_SYSTEM, messages);
+    return json({ reply });
+  } catch (e) {
+    console.error("audio_qa failed:", e);
+    return json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -140,6 +154,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body.type === "explain" && body.item_id) return await explain(db, body.item_id);
     if (body.type === "mock" && body.session_id) return await mock(db, body.session_id, body.answer);
+    if (body.type === "audio_qa" && body.prompt) return await audioQa(db, body.prompt);
+    
     return json({ error: "Unknown request" }, 400);
   } catch (e) {
     console.error("coach crashed:", e);
