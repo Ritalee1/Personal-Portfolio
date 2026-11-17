@@ -34,7 +34,7 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={[s.header, { borderColor: t.border, backgroundColor: t.card }]}>
             <Tab t={t} label="Study feed" active={tab === "feed"} onPress={() => setTab("feed")} />
-            <Tab t={t} label="Mock interview" active={tab === "mock"} onPress={() => setTab("mock")} />
+            <Tab t={t} label="Interview" active={tab === "mock"} onPress={() => setTab("mock")} />
             <Pressable onPress={() => supabase.auth.signOut()}><Text style={{ color: t.muted }}>Sign out</Text></Pressable>
           </View>
           {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} userId={session.user.id} />}
@@ -294,8 +294,8 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
     if (!roleTitle.trim()) return;
     const { data, error } = await supabase.from("mock_sessions").insert({ role_title: roleTitle.trim() }).select().single();
     if (error) return Alert.alert("Error", error.message);
+    // Don't call the AI yet — the candidate speaks first.
     setCurrent(data as MockSession);
-    await turn(data as MockSession);
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -311,7 +311,7 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={card}>
-          <Text style={[s.h2, { color: t.text }]}>Start a practice interview</Text>
+          <Text style={[s.h2, { color: t.text }]}>Start an interview</Text>
           <TextInput
             style={[s.input, { color: t.text, borderColor: t.border }]}
             placeholder="Role, e.g. Virtual Assistant"
@@ -352,6 +352,13 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
           </View>
         </View>
         <Text style={[s.h2, { color: t.text }]}>{current.role_title}</Text>
+        {current.messages.length === 0 && (
+          <View style={card}>
+            <Text style={{ color: t.muted, lineHeight: 21 }}>
+              You're interviewing for {current.role_title}. Introduce yourself or say you're ready — type or dictate your opener below to begin.
+            </Text>
+          </View>
+        )}
         {current.messages.map((m, i) => (
           <View key={i} style={[...card, m.role === "user" && { borderLeftWidth: 3, borderLeftColor: t.accent }]}>
             <Text style={{ color: t.muted, fontSize: 12 }}>{m.role === "assistant" ? "Interviewer" : "You"}</Text>

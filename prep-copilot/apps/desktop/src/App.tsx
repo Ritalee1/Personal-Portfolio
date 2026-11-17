@@ -55,7 +55,7 @@ export default function App() {
         <strong>Prep Copilot</strong>
         <nav>
           <button className={tab === "study" ? "active" : ""} onClick={() => setTab("study")}>Study</button>
-          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Mock interview</button>
+          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Interview</button>
         </nav>
         <button className="secondary" onClick={() => window.copilot.hideWindow()} title="Hide the window (bring it back with Ctrl+Shift+H)">Hide</button>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
@@ -299,8 +299,8 @@ function Mock({ userId }: { userId: string }) {
     if (!roleTitle.trim()) return;
     const { data, error } = await supabase.from("mock_sessions").insert({ role_title: roleTitle.trim() }).select().single();
     if (error) return alert(error.message);
+    // Don't call the AI yet — the candidate speaks first.
     setCurrent(data as MockSession);
-    await turn(data as MockSession);
   };
 
   const deleteSession = async (id: string) => {
@@ -315,7 +315,7 @@ function Mock({ userId }: { userId: string }) {
     return (
       <main>
         <section className="composer">
-          <h2>Start a practice interview</h2>
+          <h2>Start an interview</h2>
           <input placeholder="Role, e.g. Virtual Assistant" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
           <div className="row">
             <button disabled={busy} onClick={start}>Start</button>
@@ -352,6 +352,11 @@ function Mock({ userId }: { userId: string }) {
         <label className="muted"><input type="checkbox" checked={speak} onChange={(e) => setSpeak(e.target.checked)} /> Read questions aloud</label>
       </div>
       <h2>{current.role_title}</h2>
+      {current.messages.length === 0 && (
+        <article className="card">
+          <p className="muted">You're in the room for a <strong>{current.role_title}</strong> interview. Introduce yourself or say you're ready — speak or type your opener below to begin.</p>
+        </article>
+      )}
       {current.messages.map((m, i) => (
         <article key={i} className={`card ${m.role}`}>
           <div className="meta">{m.role === "assistant" ? "Interviewer" : "You"}</div>

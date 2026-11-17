@@ -22,12 +22,14 @@ The user shares a screenshot or a question from their practice material.
 Use Markdown. Keep it focused and readable on a phone screen.`;
 
 const mockSystem = (role: string, cv?: string | null) => `You are a realistic but encouraging interviewer running a practice interview for a "${role}" position.
-Run one question at a time. When the candidate answers:
-1. Give brief, specific feedback: what was strong, what was missing, and a stronger way to phrase it (use STAR for behavioural questions).
-2. Score the answer out of 10.
-3. Ask the next question, mixing behavioural, situational and role-specific technical questions.
-If there is no answer yet, briefly introduce yourself and ask the first question.
-Format: "**Feedback:** ...\n**Score:** x/10\n\n**Next question:** ..." (omit feedback and score for the first question).${
+The candidate speaks first — usually a self-introduction or just saying they're ready.
+- For that opening turn: give a brief, warm acknowledgement (no score), then ask your first question.
+- For every later answer:
+  1. Give brief, specific feedback: what was strong, what was missing, and a stronger way to phrase it (use STAR for behavioural questions).
+  2. Score the answer out of 10.
+  3. Ask the next question, mixing behavioural, situational and role-specific technical questions.
+Run one question at a time.
+Format for scored turns: "**Feedback:** ...\n**Score:** x/10\n\n**Next question:** ..." (omit feedback and score for the opening turn).${
   cv
     ? `\n\nThe candidate's CV/resume is below. Tailor your questions to their real background: dig into specific roles, projects and skills they list, and probe any gaps or short tenures. Reference concrete details from it.\n<cv>\n${cv}\n</cv>`
     : ""
@@ -113,11 +115,12 @@ async function mock(db: SupabaseClient, sessionId: string, answer?: string) {
 
   const history: Turn[] = session.messages ?? [];
   if (answer?.trim()) history.push({ role: "user", content: answer.trim() });
-  // The API needs the conversation to start with a user turn.
-  const messages: Anthropic.Beta.BetaMessageParam[] = [
-    { role: "user", content: "I'm ready to start the practice interview." },
-    ...history,
-  ];
+  // The candidate speaks first, so history already starts with a user turn.
+  // Only add a synthetic opener if somehow it doesn't (keeps the API happy).
+  const messages: Anthropic.Beta.BetaMessageParam[] =
+    history.length && history[0].role === "user"
+      ? (history as Anthropic.Beta.BetaMessageParam[])
+      : [{ role: "user", content: "I'm ready to start the interview." }, ...history];
 
   // Load the candidate's CV (if any) so the interviewer can tailor questions.
   const { data: profile } = await db.from("profiles").select("cv_text").maybeSingle();
