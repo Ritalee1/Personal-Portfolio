@@ -18,7 +18,10 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.prepcopilot.mobile"
+      "package": "com.prepcopilot.mobile",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -31,6 +34,12 @@
           "cameraPermission": "Take a photo of practice material to get it explained."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b13c855b-95f2-4d2f-ad65-a3024eeaed80"
+      }
+    },
+    "owner": "nswift1"
   }
 }
