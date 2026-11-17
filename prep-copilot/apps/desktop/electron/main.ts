@@ -98,6 +98,9 @@ function setupRemoteTriggers() {
 ipcMain.handle("capture-screen", () => captureScreen());
 
 app.whenReady().then(() => {
+  // Suppress harmless Windows GPU cache lock error noise
+  app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+
   createWindow();
   setupRemoteTriggers();
 
