@@ -130,17 +130,34 @@ function Feed({ t, userId }: { t: Theme; userId: string }) {
     }
   };
 
-  // Remote desktop capture trigger via Supabase Realtime Broadcast
+  // Remote desktop capture trigger via Supabase Realtime Broadcast.
+  // A channel must be SUBSCRIBED before .send() will actually deliver.
   const triggerRemoteCapture = async () => {
+    const channel = supabase.channel("desktop-commands");
     try {
-      await supabase.channel("desktop-commands").send({
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timed out reaching the laptop. Is the laptop app open and signed in?")), 8000);
+        channel.subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            clearTimeout(timeout);
+            resolve();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            clearTimeout(timeout);
+            reject(new Error("Could not connect to realtime."));
+          }
+        });
+      });
+      const res = await channel.send({
         type: "broadcast",
         event: "trigger_capture",
         payload: { timestamp: Date.now() },
       });
-      Alert.alert("Capture Triggered", "Laptop is taking a screenshot in stealth mode.");
+      if (res !== "ok") throw new Error("The laptop did not acknowledge the request.");
+      Alert.alert("Capture triggered", "The laptop is taking a screenshot. It will appear in your feed in a moment.");
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      Alert.alert("Error", e?.message ?? String(e));
+    } finally {
+      supabase.removeChannel(channel);
     }
   };
 

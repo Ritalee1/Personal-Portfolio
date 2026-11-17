@@ -13,6 +13,27 @@ export default function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  // Listen for remote "Capture PC" taps from the phone. The capture is grabbed
+  // by the main process, then uploaded here where we hold the logged-in session.
+  useEffect(() => {
+    if (!session) return;
+    const userId = session.user.id;
+    const channel = supabase
+      .channel("desktop-commands")
+      .on("broadcast", { event: "trigger_capture" }, async () => {
+        try {
+          const png = await window.copilot.captureScreen();
+          await submitItem(userId, "Live capture from laptop (triggered from phone).", png);
+        } catch (e) {
+          console.error("Remote capture failed:", e);
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session]);
+
   if (!session) return <Login />;
 
   return (
