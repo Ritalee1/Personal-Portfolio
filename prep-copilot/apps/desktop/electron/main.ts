@@ -10,6 +10,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const CAPTURE_SHORTCUT = "CommandOrControl+Shift+S";
 let win: BrowserWindow | null = null;
 
+// Must run BEFORE app is ready, or the switches are ignored.
+// The window runs hidden and never paints to screen, so the GPU/disk cache
+// buys us nothing — disabling it silences the Windows "cache: Access is denied"
+// and "Gpu Cache Creation failed" noise (common when running from a
+// OneDrive-synced folder like Desktop).
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+app.commandLine.appendSwitch("disable-gpu-disk-cache");
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1100,
@@ -98,9 +107,6 @@ function setupRemoteTriggers() {
 ipcMain.handle("capture-screen", () => captureScreen());
 
 app.whenReady().then(() => {
-  // Suppress harmless Windows GPU cache lock error noise
-  app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
-
   createWindow();
   setupRemoteTriggers();
 
