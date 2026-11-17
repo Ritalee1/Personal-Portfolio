@@ -7,6 +7,7 @@ import { StatusBar } from "expo-status-bar";
 import * as ImagePicker from "expo-image-picker";
 import * as Speech from "expo-speech";
 import type { Session } from "@supabase/supabase-js";
+import { decode } from "base64-arraybuffer";
 import { plain, submitItem, supabase, type Item, type MockSession } from "./src/supabase";
 
 const light = { bg: "#f6f7fb", card: "#fff", text: "#1b1d24", muted: "#6b7080", border: "#e3e5ee", accent: "#4f46e5", error: "#c0392b" };
@@ -36,7 +37,7 @@ export default function App() {
             <Tab t={t} label="Mock interview" active={tab === "mock"} onPress={() => setTab("mock")} />
             <Pressable onPress={() => supabase.auth.signOut()}><Text style={{ color: t.muted }}>Sign out</Text></Pressable>
           </View>
-          {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} />}
+          {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} userId={session.user.id} />}
         </View>
       )}
     </SafeAreaView>
@@ -236,18 +237,45 @@ function ItemCard({ t, item, onDelete }: { t: Theme; item: Item; onDelete: () =>
   );
 }
 
-function Mock({ t }: { t: Theme }) {
+function Mock({ t, userId }: { t: Theme; userId: string }) {
   const [sessions, setSessions] = useState<MockSession[]>([]);
   const [current, setCurrent] = useState<MockSession | null>(null);
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [speak, setSpeak] = useState(true);
+  const [cvName, setCvName] = useState<string | null>(null);
+  const [cvBusy, setCvBusy] = useState(false);
 
   useEffect(() => {
     supabase.from("mock_sessions").select("*").order("updated_at", { ascending: false }).limit(20)
       .then(({ data }) => setSessions((data as MockSession[]) ?? []));
   }, [current?.id]);
+
+  useEffect(() => {
+    supabase.from("profiles").select("cv_name").maybeSingle().then(({ data }) => setCvName(data?.cv_name ?? null));
+  }, []);
+
+  const uploadCv = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return Alert.alert("Permission needed");
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.8 });
+    if (res.canceled || !res.assets[0]?.base64) return;
+    setCvBusy(true);
+    try {
+      const path = `${userId}/cv-${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage.from("captures").upload(path, decode(res.assets[0].base64), { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+      const { error } = await supabase.functions.invoke("coach", { body: { type: "set_cv", image_path: path, cv_name: "CV photo" } });
+      if (error) throw error;
+      setCvName("CV photo");
+      Alert.alert("CV added", "Your mock interviews will now be based on your CV.");
+    } catch (e: any) {
+      Alert.alert("Could not add CV", e?.message ?? String(e));
+    } finally {
+      setCvBusy(false);
+    }
+  };
 
   const turn = async (session: MockSession, text?: string) => {
     setBusy(true);
@@ -291,7 +319,13 @@ function Mock({ t }: { t: Theme }) {
             value={roleTitle}
             onChangeText={setRoleTitle}
           />
-          <Button t={t} label="Start" disabled={busy} onPress={start} />
+          <View style={s.row}>
+            <Button t={t} label="Start" disabled={busy} onPress={start} />
+            <Button t={t} label={cvBusy ? "Reading CV..." : cvName ? "Replace CV" : "Add CV"} secondary disabled={cvBusy} onPress={uploadCv} />
+          </View>
+          <Text style={{ color: t.muted, fontSize: 13 }}>
+            {cvName ? `CV added — interviews will be based on it.` : "Add your CV (a photo or screenshot) so questions match your experience."}
+          </Text>
         </View>
         {sessions.map((m) => (
           <View key={m.id} style={[card, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}>

@@ -60,7 +60,7 @@ export default function App() {
         <button className="secondary" onClick={() => window.copilot.hideWindow()} title="Hide the window (bring it back with Ctrl+Shift+H)">Hide</button>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>
-      {tab === "study" ? <Study userId={session.user.id} /> : <Mock />}
+      {tab === "study" ? <Study userId={session.user.id} /> : <Mock userId={session.user.id} />}
     </div>
   );
 }
@@ -201,18 +201,42 @@ function ItemCard({ item, onDelete }: { item: Item; onDelete: () => void }) {
   );
 }
 
-function Mock() {
+function Mock({ userId }: { userId: string }) {
   const [sessions, setSessions] = useState<MockSession[]>([]);
   const [current, setCurrent] = useState<MockSession | null>(null);
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [speak, setSpeak] = useState(true);
+  const [cvName, setCvName] = useState<string | null>(null);
+  const [cvBusy, setCvBusy] = useState(false);
 
   useEffect(() => {
     supabase.from("mock_sessions").select("*").order("updated_at", { ascending: false }).limit(20)
       .then(({ data }) => setSessions((data as MockSession[]) ?? []));
   }, [current?.id]);
+
+  useEffect(() => {
+    supabase.from("profiles").select("cv_name").maybeSingle().then(({ data }) => setCvName(data?.cv_name ?? null));
+  }, []);
+
+  const uploadCv = async (file: File) => {
+    setCvBusy(true);
+    try {
+      const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+      const path = `${userId}/cv-${Date.now()}.${ext}`;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { error: upErr } = await supabase.storage.from("captures").upload(path, bytes, { contentType: file.type || undefined, upsert: true });
+      if (upErr) throw upErr;
+      const { error } = await supabase.functions.invoke("coach", { body: { type: "set_cv", image_path: path, cv_name: file.name } });
+      if (error) throw error;
+      setCvName(file.name);
+    } catch (e) {
+      alert("Could not add CV: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCvBusy(false);
+    }
+  };
 
   const turn = async (session: MockSession, text?: string) => {
     setBusy(true);
@@ -249,7 +273,22 @@ function Mock() {
         <section className="composer">
           <h2>Start a practice interview</h2>
           <input placeholder="Role, e.g. Virtual Assistant" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
-          <button disabled={busy} onClick={start}>Start</button>
+          <div className="row">
+            <button disabled={busy} onClick={start}>Start</button>
+            <label className="secondary" style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer" }}>
+              {cvBusy ? "Reading CV..." : cvName ? "Replace CV" : "Add CV"}
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                style={{ display: "none" }}
+                disabled={cvBusy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadCv(f); e.target.value = ""; }}
+              />
+            </label>
+          </div>
+          <p className="muted">
+            {cvName ? `CV added: ${cvName} — interviews will use it.` : "Add your CV (PDF or image) so the interviewer asks questions based on your experience."}
+          </p>
         </section>
         {sessions.map((m) => (
           <article key={m.id} className="card" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>

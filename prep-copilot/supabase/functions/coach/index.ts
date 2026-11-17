@@ -21,13 +21,21 @@ The user shares a screenshot or a question from their practice material.
 - End with 2-3 short follow-up questions an interviewer might ask, so the user can practise.
 Use Markdown. Keep it focused and readable on a phone screen.`;
 
-const mockSystem = (role: string) => `You are a realistic but encouraging interviewer running a practice interview for a "${role}" position.
+const mockSystem = (role: string, cv?: string | null) => `You are a realistic but encouraging interviewer running a practice interview for a "${role}" position.
 Run one question at a time. When the candidate answers:
 1. Give brief, specific feedback: what was strong, what was missing, and a stronger way to phrase it (use STAR for behavioural questions).
 2. Score the answer out of 10.
 3. Ask the next question, mixing behavioural, situational and role-specific technical questions.
 If there is no answer yet, briefly introduce yourself and ask the first question.
-Format: "**Feedback:** ...\n**Score:** x/10\n\n**Next question:** ..." (omit feedback and score for the first question).`;
+Format: "**Feedback:** ...\n**Score:** x/10\n\n**Next question:** ..." (omit feedback and score for the first question).${
+  cv
+    ? `\n\nThe candidate's CV/resume is below. Tailor your questions to their real background: dig into specific roles, projects and skills they list, and probe any gaps or short tenures. Reference concrete details from it.\n<cv>\n${cv}\n</cv>`
+    : ""
+}`;
+
+const CV_EXTRACT_SYSTEM = `Extract the full text of this CV/resume as clean, plain text.
+Preserve the structure (name, summary, work experience with dates, education, skills).
+Output only the extracted text, with no commentary, preamble or Markdown fences.`;
 
 const AUDIO_QA_SYSTEM = `You are a lightning-fast technical and interview copilot. Answer the user's question instantly with precise, concise, and structured bullet points optimized for quick reading or text-to-speech.`;
 
@@ -111,14 +119,51 @@ async function mock(db: SupabaseClient, sessionId: string, answer?: string) {
     ...history,
   ];
 
+  // Load the candidate's CV (if any) so the interviewer can tailor questions.
+  const { data: profile } = await db.from("profiles").select("cv_text").maybeSingle();
+
   try {
-    const reply = await askClaude(mockSystem(session.role_title), messages);
+    const reply = await askClaude(mockSystem(session.role_title, profile?.cv_text), messages);
     history.push({ role: "assistant", content: reply });
     await db.from("mock_sessions").update({ messages: history, updated_at: new Date().toISOString() }).eq("id", sessionId);
     return json({ reply });
   } catch (e) {
     console.error("mock failed:", e);
     return json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+}
+
+// Read an uploaded CV (PDF or image) from storage, extract it to plain text
+// with Claude, and save it on the user's profile for use in mock interviews.
+async function setCv(db: SupabaseClient, userId: string, filePath: string, cvName?: string) {
+  try {
+    const { data: file, error: dlError } = await db.storage.from("captures").download(filePath);
+    if (dlError || !file) throw new Error(`Could not load the file: ${dlError?.message ?? "not found"}`);
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const b64 = btoa(binary);
+
+    const lower = filePath.toLowerCase();
+    const block: Anthropic.Beta.BetaContentBlockParam = lower.endsWith(".pdf")
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+      : { type: "image", source: { type: "base64", media_type: lower.endsWith(".png") ? "image/png" : "image/jpeg", data: b64 } };
+
+    const cvText = await askClaude(CV_EXTRACT_SYSTEM, [
+      { role: "user", content: [block, { type: "text", text: "Extract this CV as clean plain text." }] },
+    ]);
+
+    const { error: upErr } = await db
+      .from("profiles")
+      .upsert({ user_id: userId, cv_text: cvText, cv_name: cvName ?? null, updated_at: new Date().toISOString() });
+    if (upErr) throw upErr;
+
+    return json({ cv_text: cvText, cv_name: cvName ?? null });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("set_cv failed:", message);
+    return json({ error: message }, 502);
   }
 }
 
@@ -154,6 +199,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     if (body.type === "explain" && body.item_id) return await explain(db, body.item_id);
     if (body.type === "mock" && body.session_id) return await mock(db, body.session_id, body.answer);
+    if (body.type === "set_cv" && body.image_path) return await setCv(db, auth.user.id, body.image_path, body.cv_name);
     if (body.type === "audio_qa" && body.prompt) return await audioQa(db, body.prompt);
     
     return json({ error: "Unknown request" }, 400);
