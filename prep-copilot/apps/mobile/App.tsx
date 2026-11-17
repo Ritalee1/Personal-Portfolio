@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Platform, Pressable,
-  SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View, useColorScheme,
+  SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as ImagePicker from "expo-image-picker";
-import * as Speech from "expo-speech";
 import type { Session } from "@supabase/supabase-js";
 import { decode } from "base64-arraybuffer";
 import { plain, submitItem, supabase, type Item, type MockSession } from "./src/supabase";
@@ -243,7 +242,6 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [speak, setSpeak] = useState(true);
   const [cvName, setCvName] = useState<string | null>(null);
   const [cvBusy, setCvBusy] = useState(false);
 
@@ -284,10 +282,7 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
     if (error) return Alert.alert("Error", error.message);
     const { data: fresh } = await supabase.from("mock_sessions").select("*").eq("id", session.id).single();
     setCurrent(fresh as MockSession);
-    if (speak && data?.reply) {
-      Speech.stop();
-      Speech.speak(plain(data.reply));
-    }
+    // Interviewer replies in text only — no speaking aloud.
   };
 
   const start = async () => {
@@ -345,11 +340,7 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={[s.row, { justifyContent: "space-between" }]}>
-          <Button t={t} label="Back" secondary onPress={() => { Speech.stop(); setCurrent(null); }} />
-          <View style={s.row}>
-            <Text style={{ color: t.muted }}>Read aloud</Text>
-            <Switch value={speak} onValueChange={setSpeak} />
-          </View>
+          <Button t={t} label="Back" secondary onPress={() => setCurrent(null)} />
         </View>
         <Text style={[s.h2, { color: t.text }]}>{current.role_title}</Text>
         {current.messages.length === 0 && (

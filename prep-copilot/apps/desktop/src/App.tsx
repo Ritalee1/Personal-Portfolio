@@ -207,7 +207,6 @@ function Mock({ userId }: { userId: string }) {
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [speak, setSpeak] = useState(true);
   const [cvName, setCvName] = useState<string | null>(null);
   const [cvBusy, setCvBusy] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -289,10 +288,8 @@ function Mock({ userId }: { userId: string }) {
     if (error) return alert(error.message);
     const { data: fresh } = await supabase.from("mock_sessions").select("*").eq("id", session.id).single();
     setCurrent(fresh as MockSession);
-    if (speak && data?.reply) {
-      speechSynthesis.cancel();
-      speechSynthesis.speak(new SpeechSynthesisUtterance(data.reply.replace(/[*#_`]/g, "")));
-    }
+    // Interviewer replies in text only — no speaking aloud.
+    void data;
   };
 
   const start = async () => {
@@ -349,7 +346,6 @@ function Mock({ userId }: { userId: string }) {
     <main>
       <div className="row">
         <button className="secondary" onClick={() => setCurrent(null)}>Back</button>
-        <label className="muted"><input type="checkbox" checked={speak} onChange={(e) => setSpeak(e.target.checked)} /> Read questions aloud</label>
       </div>
       <h2>{current.role_title}</h2>
       {current.messages.length === 0 && (
