@@ -2,7 +2,7 @@ import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } 
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client for stealth sync and remote triggers
+// Initialize Supabase client for desktop background sync and remote triggers
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://xblvpcmzvnsmzlfnprlg.supabase.co";
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_V5DRJu_ROxMPDDXYyBYb9g_5a_HpKzc";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -28,7 +28,7 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
 
-/** Screenshot of the display the cursor is on, uploads to Supabase for mobile viewing. */
+/** Screenshot of the display the cursor is on, uploads to Supabase matching SQL security policies. */
 async function captureScreen(): Promise<string> {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { width, height } = display.size;
@@ -48,24 +48,41 @@ async function captureScreen(): Promise<string> {
 
 async function uploadCaptureToSupabase(imageBuffer: Buffer) {
   try {
+    // 1. Get the currently active user session
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !session?.user) {
+      console.error("Desktop app session missing. Please log in first.");
+      return;
+    }
+
+    const userId = session.user.id;
     const fileName = `stealth_${Date.now()}.png`;
+    // 2. Strict storage path matching your SQL RLS policy: bucket_id = 'captures', folder = userId
+    const storagePath = `${userId}/${fileName}`;
+
     const { error: uploadError } = await supabase.storage
       .from("captures")
-      .upload(fileName, imageBuffer, { contentType: "image/png" });
+      .upload(storagePath, imageBuffer, { contentType: "image/png" });
 
     if (uploadError) throw uploadError;
 
-    await supabase.from("items").insert({
-      image_path: fileName,
+    // 3. Insert item explicitly including user_id and source: 'desktop' to satisfy constraints
+    const { error: insertError } = await supabase.from("items").insert({
+      user_id: userId,
+      image_path: storagePath,
       prompt: "Live stealth capture from laptop workspace.",
       status: "pending",
+      source: "desktop",
     });
+
+    if (insertError) throw insertError;
   } catch (err) {
     console.error("Failed to upload stealth capture:", err);
   }
 }
 
 function setupRemoteTriggers() {
+  // Listens for remote capture broadcasts sent from your phone's floating button
   supabase
     .channel("desktop-commands")
     .on("broadcast", { event: "trigger_capture" }, async () => {
