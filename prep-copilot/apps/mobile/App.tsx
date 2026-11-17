@@ -33,7 +33,7 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={[s.header, { borderColor: t.border, backgroundColor: t.card }]}>
             <Tab t={t} label="Study feed" active={tab === "feed"} onPress={() => setTab("feed")} />
-            <Tab t={t} label="Interview" active={tab === "mock"} onPress={() => setTab("mock")} />
+            <Tab t={t} label="Interview Assistant" active={tab === "mock"} onPress={() => setTab("mock")} />
             <Pressable onPress={() => supabase.auth.signOut()}><Text style={{ color: t.muted }}>Sign out</Text></Pressable>
           </View>
           {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} userId={session.user.id} />}
@@ -306,7 +306,8 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={card}>
-          <Text style={[s.h2, { color: t.text }]}>Start an interview</Text>
+          <Text style={[s.h2, { color: t.text }]}>Interview Assistant</Text>
+          <Text style={{ color: t.muted, fontSize: 13 }}>Enter the role, then tell Maya what you want to work on — she follows your lead.</Text>
           <TextInput
             style={[s.input, { color: t.text, borderColor: t.border }]}
             placeholder="Role, e.g. Virtual Assistant"
@@ -346,13 +347,13 @@ function Mock({ t, userId }: { t: Theme; userId: string }) {
         {current.messages.length === 0 && (
           <View style={card}>
             <Text style={{ color: t.muted, lineHeight: 21 }}>
-              You're interviewing for {current.role_title}. Introduce yourself or say you're ready — type or dictate your opener below to begin.
+              Hi, I'm Maya 👋 — your assistant for {current.role_title} prep. Tell me what you'd like to work on: practise questions, polish an answer, quiz you on a topic, or a weak area. Type or tap the keyboard mic to speak.
             </Text>
           </View>
         )}
         {current.messages.map((m, i) => (
           <View key={i} style={[...card, m.role === "user" && { borderLeftWidth: 3, borderLeftColor: t.accent }]}>
-            <Text style={{ color: t.muted, fontSize: 12 }}>{m.role === "assistant" ? "Interviewer" : "You"}</Text>
+            <Text style={{ color: t.muted, fontSize: 12 }}>{m.role === "assistant" ? "Maya" : "You"}</Text>
             <Text selectable style={{ color: t.text, lineHeight: 21 }}>{plain(m.content)}</Text>
           </View>
         ))}

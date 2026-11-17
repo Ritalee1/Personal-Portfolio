@@ -55,7 +55,7 @@ export default function App() {
         <strong>Prep Copilot</strong>
         <nav>
           <button className={tab === "study" ? "active" : ""} onClick={() => setTab("study")}>Study</button>
-          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Interview</button>
+          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Interview Assistant</button>
         </nav>
         <button className="secondary" onClick={() => window.copilot.hideWindow()} title="Hide the window (bring it back with Ctrl+Shift+H)">Hide</button>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
@@ -312,7 +312,8 @@ function Mock({ userId }: { userId: string }) {
     return (
       <main>
         <section className="composer">
-          <h2>Start an interview</h2>
+          <h2>Interview Assistant</h2>
+          <p className="muted">Enter the role, then tell Maya what you want to work on — she follows your lead.</p>
           <input placeholder="Role, e.g. Virtual Assistant" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
           <div className="row">
             <button disabled={busy} onClick={start}>Start</button>
@@ -350,12 +351,12 @@ function Mock({ userId }: { userId: string }) {
       <h2>{current.role_title}</h2>
       {current.messages.length === 0 && (
         <article className="card">
-          <p className="muted">You're in the room for a <strong>{current.role_title}</strong> interview. Introduce yourself or say you're ready — speak or type your opener below to begin.</p>
+          <p className="muted">Hi, I'm Maya 👋 — your assistant for <strong>{current.role_title}</strong> prep. Tell me what you'd like to work on: practise specific questions, polish an answer, quiz you on a topic, or tackle a weak area. Type or use the mic.</p>
         </article>
       )}
       {current.messages.map((m, i) => (
         <article key={i} className={`card ${m.role}`}>
-          <div className="meta">{m.role === "assistant" ? "Interviewer" : "You"}</div>
+          <div className="meta">{m.role === "assistant" ? "Maya" : "You"}</div>
           <Markdown>{m.content}</Markdown>
         </article>
       ))}
