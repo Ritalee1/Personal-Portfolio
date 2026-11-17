@@ -216,6 +216,14 @@ function Mock() {
     await turn(data as MockSession);
   };
 
+  const deleteSession = async (id: string) => {
+    if (!confirm("Delete this practice interview? This can't be undone.")) return;
+    const { error } = await supabase.from("mock_sessions").delete().eq("id", id);
+    if (error) return alert(error.message);
+    setSessions((prev) => prev.filter((m) => m.id !== id));
+    if (current?.id === id) setCurrent(null);
+  };
+
   if (!current)
     return (
       <main>
@@ -224,9 +232,12 @@ function Mock() {
           <input placeholder="Role, e.g. Virtual Assistant" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
           <button disabled={busy} onClick={start}>Start</button>
         </section>
-        {sessions.map((s) => (
-          <article key={s.id} className="card clickable" onClick={() => setCurrent(s)}>
-            <strong>{s.role_title}</strong> <span className="muted">· {s.messages.length} turns · {new Date(s.created_at).toLocaleDateString()}</span>
+        {sessions.map((m) => (
+          <article key={m.id} className="card" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="clickable" style={{ flex: 1 }} onClick={() => setCurrent(m)}>
+              <strong>{m.role_title}</strong> <span className="muted">· {m.messages.length} turns · {new Date(m.created_at).toLocaleDateString()}</span>
+            </span>
+            <button className="link" style={{ color: "var(--error)" }} onClick={() => deleteSession(m.id)}>Delete</button>
           </article>
         ))}
       </main>
