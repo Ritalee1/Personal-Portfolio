@@ -8,6 +8,7 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const CAPTURE_SHORTCUT = "CommandOrControl+Shift+S";
+const TOGGLE_SHORTCUT = "CommandOrControl+Shift+H"; // Manually hide/show the window
 let win: BrowserWindow | null = null;
 
 // Must run BEFORE app is ready, or the switches are ignored.
@@ -24,7 +25,7 @@ function createWindow() {
     width: 1100,
     height: 760,
     title: "Prep Copilot",
-    show: false, // Stealth mode: runs silently in the background
+    show: true, // Visible on launch; hide manually with Ctrl/Cmd+Shift+H
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -109,6 +110,16 @@ ipcMain.handle("capture-screen", () => captureScreen());
 app.whenReady().then(() => {
   createWindow();
   setupRemoteTriggers();
+
+  // Global Hotkey: manually toggle the window between hidden and visible
+  globalShortcut.register(TOGGLE_SHORTCUT, () => {
+    if (!win) return createWindow();
+    if (win.isVisible()) win.hide();
+    else {
+      win.show();
+      win.focus();
+    }
+  });
 
   // Global Hotkey: capture screen silently in the background
   globalShortcut.register(CAPTURE_SHORTCUT, async () => {
