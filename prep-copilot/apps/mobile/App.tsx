@@ -93,11 +93,15 @@ function Feed({ t, userId }: { t: Theme; userId: string }) {
 
   useEffect(() => {
     supabase.from("items").select("*").order("created_at", { ascending: false }).limit(50).then(({ data }) => setItems((data as Item[]) ?? []));
+    
     // Live sync with the laptop: captures and answers appear here as they happen.
     const channel = supabase
       .channel("items-mobile")
       .on("postgres_changes", { event: "*", schema: "public", table: "items" }, (payload) => {
-        if (payload.eventType === "DELETE") return;
+        if (payload.eventType === "DELETE") {
+          setItems((prev) => prev.filter((i) => i.id !== (payload.old as any).id));
+          return;
+        }
         const row = payload.new as Item;
         setItems((prev) => [row, ...prev.filter((i) => i.id !== row.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
       })
@@ -126,45 +130,84 @@ function Feed({ t, userId }: { t: Theme; userId: string }) {
     }
   };
 
+  // Remote desktop capture trigger via Supabase Realtime Broadcast
+  const triggerRemoteCapture = async () => {
+    try {
+      await supabase.channel("desktop-commands").send({
+        type: "broadcast",
+        event: "trigger_capture",
+        payload: { timestamp: Date.now() },
+      });
+      Alert.alert("Capture Triggered", "Laptop is taking a screenshot in stealth mode.");
+    } catch (e: any) {
+      Alert.alert("Error", e.message);
+    }
+  };
+
+  // Delete item and remove its image from storage if present
+  const deleteItem = async (itemId: string, imagePath?: string | null) => {
+    try {
+      if (imagePath) {
+        await supabase.storage.from("captures").remove([imagePath]);
+      }
+      await supabase.from("items").delete().eq("id", itemId);
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+    } catch (e: any) {
+      Alert.alert("Delete failed", e.message);
+    }
+  };
+
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <FlatList
-        data={items}
-        keyExtractor={(i) => i.id}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
-        ListHeaderComponent={
-          <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
-            <TextInput
-              style={[s.input, { color: t.text, borderColor: t.border, minHeight: 60 }]}
-              placeholder="Ask a practice question, or add a note to a photo"
-              placeholderTextColor={t.muted}
-              multiline
-              value={prompt}
-              onChangeText={setPrompt}
-            />
-            <View style={s.row}>
-              <Button t={t} label="Explain" disabled={busy} onPress={() => send()} />
-              <Button t={t} label="Camera" secondary disabled={busy} onPress={() => send(true)} />
-              <Button t={t} label="Photo" secondary disabled={busy} onPress={() => send(false)} />
+    <View style={{ flex: 1 }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <FlatList
+          data={items}
+          keyExtractor={(i) => i.id}
+          contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 100 }}
+          ListHeaderComponent={
+            <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
+              <TextInput
+                style={[s.input, { color: t.text, borderColor: t.border, minHeight: 60 }]}
+                placeholder="Ask a practice question, or add a note to a photo"
+                placeholderTextColor={t.muted}
+                multiline
+                value={prompt}
+                onChangeText={setPrompt}
+              />
+              <View style={s.row}>
+                <Button t={t} label="Explain" disabled={busy} onPress={() => send()} />
+                <Button t={t} label="Camera" secondary disabled={busy} onPress={() => send(true)} />
+                <Button t={t} label="Photo" secondary disabled={busy} onPress={() => send(false)} />
+              </View>
             </View>
-          </View>
-        }
-        renderItem={({ item }) => <ItemCard t={t} item={item} />}
-      />
-    </KeyboardAvoidingView>
+          }
+          renderItem={({ item }) => <ItemCard t={t} item={item} onDelete={() => deleteItem(item.id, item.image_path)} />}
+        />
+      </KeyboardAvoidingView>
+
+      {/* Floating Action Button (FAB) to snap laptop screen in stealth mode */}
+      <Pressable style={[s.fab, { backgroundColor: t.accent }]} onPress={triggerRemoteCapture}>
+        <Text style={s.fabText}>📸 Capture PC</Text>
+      </Pressable>
+    </View>
   );
 }
 
-function ItemCard({ t, item }: { t: Theme; item: Item }) {
+function ItemCard({ t, item, onDelete }: { t: Theme; item: Item; onDelete: () => void }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     if (item.image_path) supabase.storage.from("captures").createSignedUrl(item.image_path, 3600).then(({ data }) => setUrl(data?.signedUrl));
   }, [item.image_path]);
   return (
     <View style={[s.card, { backgroundColor: t.card, borderColor: t.border }]}>
-      <Text style={{ color: t.muted, fontSize: 12 }}>
-        {item.source === "desktop" ? "From laptop" : "From phone"} · {new Date(item.created_at).toLocaleString()}
-      </Text>
+      <View style={[s.row, { justifyContent: "space-between" }]}>
+        <Text style={{ color: t.muted, fontSize: 12 }}>
+          {item.source === "desktop" ? "From laptop" : "From phone"} · {new Date(item.created_at).toLocaleString()}
+        </Text>
+        <Pressable onPress={onDelete}>
+          <Text style={{ color: t.error, fontSize: 12, fontWeight: "600" }}>Delete</Text>
+        </Pressable>
+      </View>
       {url && <Image source={{ uri: url }} style={s.thumb} resizeMode="contain" />}
       {!!item.prompt && <Text style={{ color: t.text, fontStyle: "italic" }}>{item.prompt}</Text>}
       {item.status === "pending" ? (
@@ -210,6 +253,13 @@ function Mock({ t }: { t: Theme }) {
     await turn(data as MockSession);
   };
 
+  const deleteSession = async (sessionId: string) => {
+    const { error } = await supabase.from("mock_sessions").delete().eq("id", sessionId);
+    if (error) return Alert.alert("Error", error.message);
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (current?.id === sessionId) setCurrent(null);
+  };
+
   const card = [s.card, { backgroundColor: t.card, borderColor: t.border }];
 
   if (!current)
@@ -227,10 +277,15 @@ function Mock({ t }: { t: Theme }) {
           <Button t={t} label="Start" disabled={busy} onPress={start} />
         </View>
         {sessions.map((m) => (
-          <Pressable key={m.id} style={card} onPress={() => setCurrent(m)}>
-            <Text style={{ color: t.text, fontWeight: "600" }}>{m.role_title}</Text>
-            <Text style={{ color: t.muted, fontSize: 12 }}>{m.messages.length} turns · {new Date(m.created_at).toLocaleDateString()}</Text>
-          </Pressable>
+          <View key={m.id} style={[card, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}>
+            <Pressable style={{ flex: 1 }} onPress={() => setCurrent(m)}>
+              <Text style={{ color: t.text, fontWeight: "600" }}>{m.role_title}</Text>
+              <Text style={{ color: t.muted, fontSize: 12 }}>{m.messages.length} turns · {new Date(m.created_at).toLocaleDateString()}</Text>
+            </Pressable>
+            <Pressable onPress={() => deleteSession(m.id)}>
+              <Text style={{ color: t.error, fontWeight: "600", fontSize: 12 }}>Delete</Text>
+            </Pressable>
+          </View>
         ))}
       </ScrollView>
     );
@@ -273,7 +328,7 @@ function Mock({ t }: { t: Theme }) {
 
 const s = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderBottomWidth: 1 },
-  tab: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1 },
+  tab: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: `8` as any, borderWidth: 1 },
   button: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, alignItems: "center" },
   input: { borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 16, textAlignVertical: "top" },
   card: { borderWidth: 1, borderRadius: 12, padding: 14, gap: 8 },
@@ -281,4 +336,6 @@ const s = StyleSheet.create({
   thumb: { width: "100%", height: 200, borderRadius: 8 },
   h1: { fontSize: 28, fontWeight: "700" },
   h2: { fontSize: 20, fontWeight: "700" },
+  fab: { position: "absolute", right: 25, bottom: 25, width: 120, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center", elevation: 6, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
+  fabText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
 });
