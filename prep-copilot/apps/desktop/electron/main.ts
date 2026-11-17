@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import path from "node:path";
 
 const CAPTURE_SHORTCUT = "CommandOrControl+Shift+S";
@@ -56,6 +56,11 @@ ipcMain.handle("capture-screen", () => captureScreen());
 ipcMain.handle("hide-window", () => win?.hide());
 
 app.whenReady().then(() => {
+  // Allow microphone access (for voice input in mock interviews).
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === "media");
+  });
+
   createWindow();
 
   // Global Hotkey: manually toggle the window between hidden and visible

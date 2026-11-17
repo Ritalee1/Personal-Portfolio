@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Markdown from "react-markdown";
 import { supabase, submitItem, type Item, type MockSession } from "./supabase";
@@ -210,6 +210,50 @@ function Mock({ userId }: { userId: string }) {
   const [speak, setSpeak] = useState(true);
   const [cvName, setCvName] = useState<string | null>(null);
   const [cvBusy, setCvBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const toggleMic = async () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (!blob.size) return;
+        setTranscribing(true);
+        try {
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result).split(",")[1] ?? "");
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          const { data, error } = await supabase.functions.invoke("coach", { body: { type: "transcribe", audio: b64, mime: "audio/webm" } });
+          if (error) throw error;
+          if (data?.text) setAnswer((prev) => (prev ? prev.trim() + " " : "") + data.text.trim());
+        } catch (e) {
+          alert("Could not transcribe: " + (e instanceof Error ? e.message : String(e)));
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch (e) {
+      alert("Microphone error: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   useEffect(() => {
     supabase.from("mock_sessions").select("*").order("updated_at", { ascending: false }).limit(20)
@@ -315,10 +359,20 @@ function Mock({ userId }: { userId: string }) {
         </article>
       ))}
       <section className="composer">
-        <textarea placeholder="Type (or dictate) your answer..." value={answer} onChange={(e) => setAnswer(e.target.value)} />
-        <button disabled={busy || !answer.trim()} onClick={async () => { const a = answer; setAnswer(""); await turn(current, a); }}>
-          {busy ? "Interviewer is thinking..." : "Submit answer"}
-        </button>
+        <textarea placeholder="Type your answer, or tap the mic and speak..." value={answer} onChange={(e) => setAnswer(e.target.value)} />
+        <div className="row">
+          <button
+            className="secondary"
+            disabled={transcribing}
+            onClick={toggleMic}
+            style={recording ? { borderColor: "var(--error)", color: "var(--error)" } : undefined}
+          >
+            {recording ? "⏹ Stop recording" : transcribing ? "Transcribing..." : "🎤 Speak answer"}
+          </button>
+          <button disabled={busy || !answer.trim()} onClick={async () => { const a = answer; setAnswer(""); await turn(current, a); }}>
+            {busy ? "Interviewer is thinking..." : "Submit answer"}
+          </button>
+        </div>
       </section>
     </main>
   );

@@ -167,6 +167,42 @@ async function setCv(db: SupabaseClient, userId: string, filePath: string, cvNam
   }
 }
 
+function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+// Transcribe recorded audio to text via an OpenAI-compatible Whisper endpoint.
+// Works with OpenAI (default) or any compatible provider (e.g. Groq) by setting
+// STT_BASE_URL / STT_MODEL. Key lives only here as a function secret.
+async function transcribe(audioB64: string, mime = "audio/webm") {
+  const key = Deno.env.get("STT_API_KEY");
+  if (!key) return json({ error: "Voice input isn't set up yet. Add STT_API_KEY in the coach function's secrets." }, 500);
+  const baseUrl = Deno.env.get("STT_BASE_URL") ?? "https://api.openai.com/v1";
+  const model = Deno.env.get("STT_MODEL") ?? "whisper-1";
+  try {
+    const bytes = b64ToBytes(audioB64);
+    const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
+    const form = new FormData();
+    form.append("file", new Blob([bytes], { type: mime }), `audio.${ext}`);
+    form.append("model", model);
+    const res = await fetch(`${baseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    const data = await res.json();
+    return json({ text: data.text ?? "" });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("transcribe failed:", message);
+    return json({ error: message }, 502);
+  }
+}
+
 async function audioQa(db: SupabaseClient, prompt: string) {
   try {
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
@@ -200,6 +236,7 @@ Deno.serve(async (req) => {
     if (body.type === "explain" && body.item_id) return await explain(db, body.item_id);
     if (body.type === "mock" && body.session_id) return await mock(db, body.session_id, body.answer);
     if (body.type === "set_cv" && body.image_path) return await setCv(db, auth.user.id, body.image_path, body.cv_name);
+    if (body.type === "transcribe" && body.audio) return await transcribe(body.audio, body.mime);
     if (body.type === "audio_qa" && body.prompt) return await audioQa(db, body.prompt);
     
     return json({ error: "Unknown request" }, 400);
