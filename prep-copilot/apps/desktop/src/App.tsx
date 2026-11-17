@@ -110,8 +110,12 @@ function Study({ userId }: { userId: string }) {
     const channel = supabase
       .channel("items")
       .on("postgres_changes", { event: "*", schema: "public", table: "items" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          const oldId = (payload.old as { id?: string }).id;
+          if (oldId) setItems((prev) => prev.filter((i) => i.id !== oldId));
+          return;
+        }
         const row = payload.new as Item;
-        if (payload.eventType === "DELETE") return;
         setItems((prev) => [row, ...prev.filter((i) => i.id !== row.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
       })
       .subscribe();
@@ -140,6 +144,17 @@ function Study({ userId }: { userId: string }) {
     }
   };
 
+  const deleteItem = async (id: string, imagePath?: string | null) => {
+    if (!confirm("Delete this item? This can't be undone.")) return;
+    try {
+      if (imagePath) await supabase.storage.from("captures").remove([imagePath]);
+      await supabase.from("items").delete().eq("id", id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <main>
       <section className="composer">
@@ -160,12 +175,12 @@ function Study({ userId }: { userId: string }) {
         </div>
         {error && <p className="error">{error}</p>}
       </section>
-      {items.map((item) => <ItemCard key={item.id} item={item} />)}
+      {items.map((item) => <ItemCard key={item.id} item={item} onDelete={() => deleteItem(item.id, item.image_path)} />)}
     </main>
   );
 }
 
-function ItemCard({ item }: { item: Item }) {
+function ItemCard({ item, onDelete }: { item: Item; onDelete: () => void }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     if (item.image_path)
@@ -174,7 +189,10 @@ function ItemCard({ item }: { item: Item }) {
 
   return (
     <article className="card">
-      <div className="meta">{item.source === "mobile" ? "From phone" : "From laptop"} · {new Date(item.created_at).toLocaleString()}</div>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <span className="meta">{item.source === "mobile" ? "From phone" : "From laptop"} · {new Date(item.created_at).toLocaleString()}</span>
+        <button className="link" style={{ color: "var(--error)" }} onClick={onDelete}>Delete</button>
+      </div>
       {url && <img className="thumb" src={url} alt="" />}
       {item.prompt && <p><em>{item.prompt}</em></p>}
       {item.status === "pending" ? <p className="muted">Thinking...</p> : <div className={item.status === "error" ? "error" : ""}><Markdown>{item.answer ?? ""}</Markdown></div>}
