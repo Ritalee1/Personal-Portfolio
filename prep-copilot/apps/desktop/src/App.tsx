@@ -57,6 +57,7 @@ export default function App() {
           <button className={tab === "study" ? "active" : ""} onClick={() => setTab("study")}>Study</button>
           <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Mock interview</button>
         </nav>
+        <button className="secondary" onClick={() => window.copilot.hideWindow()} title="Hide the window (bring it back with Ctrl+Shift+H)">Hide</button>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>
       {tab === "study" ? <Study userId={session.user.id} /> : <Mock />}

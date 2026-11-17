@@ -53,6 +53,7 @@ async function captureScreen(): Promise<string> {
 }
 
 ipcMain.handle("capture-screen", () => captureScreen());
+ipcMain.handle("hide-window", () => win?.hide());
 
 app.whenReady().then(() => {
   createWindow();

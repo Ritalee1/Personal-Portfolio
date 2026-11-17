@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("copilot", {
   captureScreen: (): Promise<string> => ipcRenderer.invoke("capture-screen"),
+  hideWindow: (): Promise<void> => ipcRenderer.invoke("hide-window"),
   onCaptured: (cb: (pngBase64: string) => void) => {
     const listener = (_: unknown, png: string) => cb(png);
     ipcRenderer.on("captured", listener);
