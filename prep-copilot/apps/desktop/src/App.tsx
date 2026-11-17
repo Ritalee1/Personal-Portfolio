@@ -3,9 +3,18 @@ import type { Session } from "@supabase/supabase-js";
 import Markdown from "react-markdown";
 import { supabase, submitItem, type Item, type MockSession } from "./supabase";
 
+type Toast = { kind: "info" | "success" | "error"; text: string } | null;
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [tab, setTab] = useState<"study" | "mock">("study");
+  const [toast, setToast] = useState<Toast>(null);
+
+  // Show a toast for a few seconds, then clear it.
+  const showToast = (t: Exclude<Toast, null>) => {
+    setToast(t);
+    window.setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -21,11 +30,14 @@ export default function App() {
     const channel = supabase
       .channel("desktop-commands")
       .on("broadcast", { event: "trigger_capture" }, async () => {
+        showToast({ kind: "info", text: "📸 Capturing screen (requested from phone)…" });
         try {
           const png = await window.copilot.captureScreen();
           await submitItem(userId, "Live capture from laptop (triggered from phone).", png);
+          showToast({ kind: "success", text: "✅ Screenshot captured and sent to your feed" });
         } catch (e) {
           console.error("Remote capture failed:", e);
+          showToast({ kind: "error", text: "⚠️ Capture failed: " + (e instanceof Error ? e.message : String(e)) });
         }
       })
       .subscribe();
@@ -38,6 +50,7 @@ export default function App() {
 
   return (
     <div className="app">
+      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
       <header>
         <strong>Prep Copilot</strong>
         <nav>

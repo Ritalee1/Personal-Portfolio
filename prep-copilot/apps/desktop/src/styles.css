@@ -27,3 +27,15 @@ textarea { min-height: 80px; resize: vertical; }
 .login { max-width: 360px; margin: 12vh auto; display: flex; flex-direction: column; gap: 10px; }
 kbd { border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 12px; }
 pre { overflow-x: auto; background: var(--bg); padding: 10px; border-radius: 8px; }
+
+/* Toast: transient confirmation, e.g. when a capture is triggered from the phone */
+.toast {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 1000; max-width: 90vw; padding: 10px 16px; border-radius: 10px;
+  background: var(--card); color: var(--text); border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); font-size: 14px; font-weight: 600;
+  animation: toast-in .18s ease-out;
+}
+.toast.success { border-color: #2e9e5b; }
+.toast.error { border-color: var(--error); color: var(--error); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translate(-50%, 0); } }
