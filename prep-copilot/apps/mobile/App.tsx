@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Platform, Pressable,
-  SafeAreaView, ScrollView, StyleSheet, Switch, Text, TextInput, View, useColorScheme,
+  SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View, useColorScheme,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import * as ImagePicker from "expo-image-picker";
-import * as Speech from "expo-speech";
 import type { Session } from "@supabase/supabase-js";
+import { decode } from "base64-arraybuffer";
 import { plain, submitItem, supabase, type Item, type MockSession } from "./src/supabase";
 
 const light = { bg: "#f6f7fb", card: "#fff", text: "#1b1d24", muted: "#6b7080", border: "#e3e5ee", accent: "#4f46e5", error: "#c0392b" };
@@ -33,10 +33,10 @@ export default function App() {
         <View style={{ flex: 1 }}>
           <View style={[s.header, { borderColor: t.border, backgroundColor: t.card }]}>
             <Tab t={t} label="Study feed" active={tab === "feed"} onPress={() => setTab("feed")} />
-            <Tab t={t} label="Mock interview" active={tab === "mock"} onPress={() => setTab("mock")} />
+            <Tab t={t} label="Interview Assistant" active={tab === "mock"} onPress={() => setTab("mock")} />
             <Pressable onPress={() => supabase.auth.signOut()}><Text style={{ color: t.muted }}>Sign out</Text></Pressable>
           </View>
-          {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} />}
+          {tab === "feed" ? <Feed t={t} userId={session.user.id} /> : <Mock t={t} userId={session.user.id} />}
         </View>
       )}
     </SafeAreaView>
@@ -130,17 +130,34 @@ function Feed({ t, userId }: { t: Theme; userId: string }) {
     }
   };
 
-  // Remote desktop capture trigger via Supabase Realtime Broadcast
+  // Remote desktop capture trigger via Supabase Realtime Broadcast.
+  // A channel must be SUBSCRIBED before .send() will actually deliver.
   const triggerRemoteCapture = async () => {
+    const channel = supabase.channel("desktop-commands");
     try {
-      await supabase.channel("desktop-commands").send({
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("Timed out reaching the laptop. Is the laptop app open and signed in?")), 8000);
+        channel.subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            clearTimeout(timeout);
+            resolve();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            clearTimeout(timeout);
+            reject(new Error("Could not connect to realtime."));
+          }
+        });
+      });
+      const res = await channel.send({
         type: "broadcast",
         event: "trigger_capture",
         payload: { timestamp: Date.now() },
       });
-      Alert.alert("Capture Triggered", "Laptop is taking a screenshot in stealth mode.");
+      if (res !== "ok") throw new Error("The laptop did not acknowledge the request.");
+      Alert.alert("Capture triggered", "The laptop is taking a screenshot. It will appear in your feed in a moment.");
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      Alert.alert("Error", e?.message ?? String(e));
+    } finally {
+      supabase.removeChannel(channel);
     }
   };
 
@@ -219,18 +236,44 @@ function ItemCard({ t, item, onDelete }: { t: Theme; item: Item; onDelete: () =>
   );
 }
 
-function Mock({ t }: { t: Theme }) {
+function Mock({ t, userId }: { t: Theme; userId: string }) {
   const [sessions, setSessions] = useState<MockSession[]>([]);
   const [current, setCurrent] = useState<MockSession | null>(null);
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [speak, setSpeak] = useState(true);
+  const [cvName, setCvName] = useState<string | null>(null);
+  const [cvBusy, setCvBusy] = useState(false);
 
   useEffect(() => {
     supabase.from("mock_sessions").select("*").order("updated_at", { ascending: false }).limit(20)
       .then(({ data }) => setSessions((data as MockSession[]) ?? []));
   }, [current?.id]);
+
+  useEffect(() => {
+    supabase.from("profiles").select("cv_name").maybeSingle().then(({ data }) => setCvName(data?.cv_name ?? null));
+  }, []);
+
+  const uploadCv = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return Alert.alert("Permission needed");
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.8 });
+    if (res.canceled || !res.assets[0]?.base64) return;
+    setCvBusy(true);
+    try {
+      const path = `${userId}/cv-${Date.now()}.jpg`;
+      const { error: upErr } = await supabase.storage.from("captures").upload(path, decode(res.assets[0].base64), { contentType: "image/jpeg", upsert: true });
+      if (upErr) throw upErr;
+      const { error } = await supabase.functions.invoke("coach", { body: { type: "set_cv", image_path: path, cv_name: "CV photo" } });
+      if (error) throw error;
+      setCvName("CV photo");
+      Alert.alert("CV added", "Your mock interviews will now be based on your CV.");
+    } catch (e: any) {
+      Alert.alert("Could not add CV", e?.message ?? String(e));
+    } finally {
+      setCvBusy(false);
+    }
+  };
 
   const turn = async (session: MockSession, text?: string) => {
     setBusy(true);
@@ -239,18 +282,15 @@ function Mock({ t }: { t: Theme }) {
     if (error) return Alert.alert("Error", error.message);
     const { data: fresh } = await supabase.from("mock_sessions").select("*").eq("id", session.id).single();
     setCurrent(fresh as MockSession);
-    if (speak && data?.reply) {
-      Speech.stop();
-      Speech.speak(plain(data.reply));
-    }
+    // Interviewer replies in text only — no speaking aloud.
   };
 
   const start = async () => {
     if (!roleTitle.trim()) return;
     const { data, error } = await supabase.from("mock_sessions").insert({ role_title: roleTitle.trim() }).select().single();
     if (error) return Alert.alert("Error", error.message);
+    // Don't call the AI yet — the candidate speaks first.
     setCurrent(data as MockSession);
-    await turn(data as MockSession);
   };
 
   const deleteSession = async (sessionId: string) => {
@@ -266,7 +306,8 @@ function Mock({ t }: { t: Theme }) {
     return (
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={card}>
-          <Text style={[s.h2, { color: t.text }]}>Start a practice interview</Text>
+          <Text style={[s.h2, { color: t.text }]}>Interview Assistant</Text>
+          <Text style={{ color: t.muted, fontSize: 13 }}>Enter the role, then tell Maya what you want to work on — she follows your lead.</Text>
           <TextInput
             style={[s.input, { color: t.text, borderColor: t.border }]}
             placeholder="Role, e.g. Virtual Assistant"
@@ -274,7 +315,13 @@ function Mock({ t }: { t: Theme }) {
             value={roleTitle}
             onChangeText={setRoleTitle}
           />
-          <Button t={t} label="Start" disabled={busy} onPress={start} />
+          <View style={s.row}>
+            <Button t={t} label="Start" disabled={busy} onPress={start} />
+            <Button t={t} label={cvBusy ? "Reading CV..." : cvName ? "Replace CV" : "Add CV"} secondary disabled={cvBusy} onPress={uploadCv} />
+          </View>
+          <Text style={{ color: t.muted, fontSize: 13 }}>
+            {cvName ? `CV added — interviews will be based on it.` : "Add your CV (a photo or screenshot) so questions match your experience."}
+          </Text>
         </View>
         {sessions.map((m) => (
           <View key={m.id} style={[card, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}>
@@ -294,16 +341,19 @@ function Mock({ t }: { t: Theme }) {
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
         <View style={[s.row, { justifyContent: "space-between" }]}>
-          <Button t={t} label="Back" secondary onPress={() => { Speech.stop(); setCurrent(null); }} />
-          <View style={s.row}>
-            <Text style={{ color: t.muted }}>Read aloud</Text>
-            <Switch value={speak} onValueChange={setSpeak} />
-          </View>
+          <Button t={t} label="Back" secondary onPress={() => setCurrent(null)} />
         </View>
         <Text style={[s.h2, { color: t.text }]}>{current.role_title}</Text>
+        {current.messages.length === 0 && (
+          <View style={card}>
+            <Text style={{ color: t.muted, lineHeight: 21 }}>
+              Hi, I'm Maya 👋 — your assistant for {current.role_title} prep. Tell me what you'd like to work on: practise questions, polish an answer, quiz you on a topic, or a weak area. Type or tap the keyboard mic to speak.
+            </Text>
+          </View>
+        )}
         {current.messages.map((m, i) => (
           <View key={i} style={[...card, m.role === "user" && { borderLeftWidth: 3, borderLeftColor: t.accent }]}>
-            <Text style={{ color: t.muted, fontSize: 12 }}>{m.role === "assistant" ? "Interviewer" : "You"}</Text>
+            <Text style={{ color: t.muted, fontSize: 12 }}>{m.role === "assistant" ? "Maya" : "You"}</Text>
             <Text selectable style={{ color: t.text, lineHeight: 21 }}>{plain(m.content)}</Text>
           </View>
         ))}

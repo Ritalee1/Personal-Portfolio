@@ -1,11 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import Markdown from "react-markdown";
 import { supabase, submitItem, type Item, type MockSession } from "./supabase";
 
+type Toast = { kind: "info" | "success" | "error"; text: string } | null;
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [tab, setTab] = useState<"study" | "mock">("study");
+  const [toast, setToast] = useState<Toast>(null);
+
+  // Show a toast for a few seconds, then clear it.
+  const showToast = (t: Exclude<Toast, null>) => {
+    setToast(t);
+    window.setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -13,19 +22,45 @@ export default function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  // Listen for remote "Capture PC" taps from the phone. The capture is grabbed
+  // by the main process, then uploaded here where we hold the logged-in session.
+  useEffect(() => {
+    if (!session) return;
+    const userId = session.user.id;
+    const channel = supabase
+      .channel("desktop-commands")
+      .on("broadcast", { event: "trigger_capture" }, async () => {
+        showToast({ kind: "info", text: "📸 Capturing screen (requested from phone)…" });
+        try {
+          const png = await window.copilot.captureScreen();
+          await submitItem(userId, "Live capture from laptop (triggered from phone).", png);
+          showToast({ kind: "success", text: "✅ Screenshot captured and sent to your feed" });
+        } catch (e) {
+          console.error("Remote capture failed:", e);
+          showToast({ kind: "error", text: "⚠️ Capture failed: " + (e instanceof Error ? e.message : String(e)) });
+        }
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session]);
+
   if (!session) return <Login />;
 
   return (
     <div className="app">
+      {toast && <div className={`toast ${toast.kind}`} role="status">{toast.text}</div>}
       <header>
         <strong>Prep Copilot</strong>
         <nav>
           <button className={tab === "study" ? "active" : ""} onClick={() => setTab("study")}>Study</button>
-          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Mock interview</button>
+          <button className={tab === "mock" ? "active" : ""} onClick={() => setTab("mock")}>Interview Assistant</button>
         </nav>
+        <button className="secondary" onClick={() => window.copilot.hideWindow()} title="Hide the window (bring it back with Ctrl+Shift+H)">Hide</button>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>
-      {tab === "study" ? <Study userId={session.user.id} /> : <Mock />}
+      {tab === "study" ? <Study userId={session.user.id} /> : <Mock userId={session.user.id} />}
     </div>
   );
 }
@@ -76,8 +111,12 @@ function Study({ userId }: { userId: string }) {
     const channel = supabase
       .channel("items")
       .on("postgres_changes", { event: "*", schema: "public", table: "items" }, (payload) => {
+        if (payload.eventType === "DELETE") {
+          const oldId = (payload.old as { id?: string }).id;
+          if (oldId) setItems((prev) => prev.filter((i) => i.id !== oldId));
+          return;
+        }
         const row = payload.new as Item;
-        if (payload.eventType === "DELETE") return;
         setItems((prev) => [row, ...prev.filter((i) => i.id !== row.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
       })
       .subscribe();
@@ -106,6 +145,17 @@ function Study({ userId }: { userId: string }) {
     }
   };
 
+  const deleteItem = async (id: string, imagePath?: string | null) => {
+    if (!confirm("Delete this item? This can't be undone.")) return;
+    try {
+      if (imagePath) await supabase.storage.from("captures").remove([imagePath]);
+      await supabase.from("items").delete().eq("id", id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <main>
       <section className="composer">
@@ -126,12 +176,12 @@ function Study({ userId }: { userId: string }) {
         </div>
         {error && <p className="error">{error}</p>}
       </section>
-      {items.map((item) => <ItemCard key={item.id} item={item} />)}
+      {items.map((item) => <ItemCard key={item.id} item={item} onDelete={() => deleteItem(item.id, item.image_path)} />)}
     </main>
   );
 }
 
-function ItemCard({ item }: { item: Item }) {
+function ItemCard({ item, onDelete }: { item: Item; onDelete: () => void }) {
   const [url, setUrl] = useState<string>();
   useEffect(() => {
     if (item.image_path)
@@ -140,7 +190,10 @@ function ItemCard({ item }: { item: Item }) {
 
   return (
     <article className="card">
-      <div className="meta">{item.source === "mobile" ? "From phone" : "From laptop"} · {new Date(item.created_at).toLocaleString()}</div>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <span className="meta">{item.source === "mobile" ? "From phone" : "From laptop"} · {new Date(item.created_at).toLocaleString()}</span>
+        <button className="link" style={{ color: "var(--error)" }} onClick={onDelete}>Delete</button>
+      </div>
       {url && <img className="thumb" src={url} alt="" />}
       {item.prompt && <p><em>{item.prompt}</em></p>}
       {item.status === "pending" ? <p className="muted">Thinking...</p> : <div className={item.status === "error" ? "error" : ""}><Markdown>{item.answer ?? ""}</Markdown></div>}
@@ -148,18 +201,85 @@ function ItemCard({ item }: { item: Item }) {
   );
 }
 
-function Mock() {
+function Mock({ userId }: { userId: string }) {
   const [sessions, setSessions] = useState<MockSession[]>([]);
   const [current, setCurrent] = useState<MockSession | null>(null);
   const [roleTitle, setRoleTitle] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [speak, setSpeak] = useState(true);
+  const [cvName, setCvName] = useState<string | null>(null);
+  const [cvBusy, setCvBusy] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const toggleMic = async () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (!blob.size) return;
+        setTranscribing(true);
+        try {
+          const b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result).split(",")[1] ?? "");
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          const { data, error } = await supabase.functions.invoke("coach", { body: { type: "transcribe", audio: b64, mime: "audio/webm" } });
+          if (error) throw error;
+          if (data?.text) setAnswer((prev) => (prev ? prev.trim() + " " : "") + data.text.trim());
+        } catch (e) {
+          alert("Could not transcribe: " + (e instanceof Error ? e.message : String(e)));
+        } finally {
+          setTranscribing(false);
+        }
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch (e) {
+      alert("Microphone error: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   useEffect(() => {
     supabase.from("mock_sessions").select("*").order("updated_at", { ascending: false }).limit(20)
       .then(({ data }) => setSessions((data as MockSession[]) ?? []));
   }, [current?.id]);
+
+  useEffect(() => {
+    supabase.from("profiles").select("cv_name").maybeSingle().then(({ data }) => setCvName(data?.cv_name ?? null));
+  }, []);
+
+  const uploadCv = async (file: File) => {
+    setCvBusy(true);
+    try {
+      const ext = (file.name.split(".").pop() || "pdf").toLowerCase();
+      const path = `${userId}/cv-${Date.now()}.${ext}`;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const { error: upErr } = await supabase.storage.from("captures").upload(path, bytes, { contentType: file.type || undefined, upsert: true });
+      if (upErr) throw upErr;
+      const { error } = await supabase.functions.invoke("coach", { body: { type: "set_cv", image_path: path, cv_name: file.name } });
+      if (error) throw error;
+      setCvName(file.name);
+    } catch (e) {
+      alert("Could not add CV: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCvBusy(false);
+    }
+  };
 
   const turn = async (session: MockSession, text?: string) => {
     setBusy(true);
@@ -168,31 +288,56 @@ function Mock() {
     if (error) return alert(error.message);
     const { data: fresh } = await supabase.from("mock_sessions").select("*").eq("id", session.id).single();
     setCurrent(fresh as MockSession);
-    if (speak && data?.reply) {
-      speechSynthesis.cancel();
-      speechSynthesis.speak(new SpeechSynthesisUtterance(data.reply.replace(/[*#_`]/g, "")));
-    }
+    // Interviewer replies in text only — no speaking aloud.
+    void data;
   };
 
   const start = async () => {
     if (!roleTitle.trim()) return;
     const { data, error } = await supabase.from("mock_sessions").insert({ role_title: roleTitle.trim() }).select().single();
     if (error) return alert(error.message);
+    // Don't call the AI yet — the candidate speaks first.
     setCurrent(data as MockSession);
-    await turn(data as MockSession);
+  };
+
+  const deleteSession = async (id: string) => {
+    if (!confirm("Delete this practice interview? This can't be undone.")) return;
+    const { error } = await supabase.from("mock_sessions").delete().eq("id", id);
+    if (error) return alert(error.message);
+    setSessions((prev) => prev.filter((m) => m.id !== id));
+    if (current?.id === id) setCurrent(null);
   };
 
   if (!current)
     return (
       <main>
         <section className="composer">
-          <h2>Start a practice interview</h2>
+          <h2>Interview Assistant</h2>
+          <p className="muted">Enter the role, then tell Maya what you want to work on — she follows your lead.</p>
           <input placeholder="Role, e.g. Virtual Assistant" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
-          <button disabled={busy} onClick={start}>Start</button>
+          <div className="row">
+            <button disabled={busy} onClick={start}>Start</button>
+            <label className="secondary" style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--border)", cursor: "pointer" }}>
+              {cvBusy ? "Reading CV..." : cvName ? "Replace CV" : "Add CV"}
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                style={{ display: "none" }}
+                disabled={cvBusy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadCv(f); e.target.value = ""; }}
+              />
+            </label>
+          </div>
+          <p className="muted">
+            {cvName ? `CV added: ${cvName} — interviews will use it.` : "Add your CV (PDF or image) so the interviewer asks questions based on your experience."}
+          </p>
         </section>
-        {sessions.map((s) => (
-          <article key={s.id} className="card clickable" onClick={() => setCurrent(s)}>
-            <strong>{s.role_title}</strong> <span className="muted">· {s.messages.length} turns · {new Date(s.created_at).toLocaleDateString()}</span>
+        {sessions.map((m) => (
+          <article key={m.id} className="card" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="clickable" style={{ flex: 1 }} onClick={() => setCurrent(m)}>
+              <strong>{m.role_title}</strong> <span className="muted">· {m.messages.length} turns · {new Date(m.created_at).toLocaleDateString()}</span>
+            </span>
+            <button className="link" style={{ color: "var(--error)" }} onClick={() => deleteSession(m.id)}>Delete</button>
           </article>
         ))}
       </main>
@@ -202,20 +347,34 @@ function Mock() {
     <main>
       <div className="row">
         <button className="secondary" onClick={() => setCurrent(null)}>Back</button>
-        <label className="muted"><input type="checkbox" checked={speak} onChange={(e) => setSpeak(e.target.checked)} /> Read questions aloud</label>
       </div>
       <h2>{current.role_title}</h2>
+      {current.messages.length === 0 && (
+        <article className="card">
+          <p className="muted">Hi, I'm Maya 👋 — your assistant for <strong>{current.role_title}</strong> prep. Tell me what you'd like to work on: practise specific questions, polish an answer, quiz you on a topic, or tackle a weak area. Type or use the mic.</p>
+        </article>
+      )}
       {current.messages.map((m, i) => (
         <article key={i} className={`card ${m.role}`}>
-          <div className="meta">{m.role === "assistant" ? "Interviewer" : "You"}</div>
+          <div className="meta">{m.role === "assistant" ? "Maya" : "You"}</div>
           <Markdown>{m.content}</Markdown>
         </article>
       ))}
       <section className="composer">
-        <textarea placeholder="Type (or dictate) your answer..." value={answer} onChange={(e) => setAnswer(e.target.value)} />
-        <button disabled={busy || !answer.trim()} onClick={async () => { const a = answer; setAnswer(""); await turn(current, a); }}>
-          {busy ? "Interviewer is thinking..." : "Submit answer"}
-        </button>
+        <textarea placeholder="Type your answer, or tap the mic and speak..." value={answer} onChange={(e) => setAnswer(e.target.value)} />
+        <div className="row">
+          <button
+            className="secondary"
+            disabled={transcribing}
+            onClick={toggleMic}
+            style={recording ? { borderColor: "var(--error)", color: "var(--error)" } : undefined}
+          >
+            {recording ? "⏹ Stop recording" : transcribing ? "Transcribing..." : "🎤 Speak answer"}
+          </button>
+          <button disabled={busy || !answer.trim()} onClick={async () => { const a = answer; setAnswer(""); await turn(current, a); }}>
+            {busy ? "Interviewer is thinking..." : "Submit answer"}
+          </button>
+        </div>
       </section>
     </main>
   );

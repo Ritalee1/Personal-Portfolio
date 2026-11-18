@@ -25,6 +25,7 @@ declare global {
   interface Window {
     copilot: {
       captureScreen(): Promise<string>;
+      hideWindow(): Promise<void>;
       onCaptured(cb: (pngBase64: string) => void): () => void;
       onCaptureError(cb: (message: string) => void): () => void;
     };

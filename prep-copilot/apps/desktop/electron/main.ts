@@ -1,25 +1,30 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from "electron";
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session } from "electron";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
-
-// Initialize Supabase client for desktop background sync and remote triggers
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || "https://xblvpcmzvnsmzlfnprlg.supabase.co";
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_V5DRJu_ROxMPDDXYyBYb9g_5a_HpKzc";
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const CAPTURE_SHORTCUT = "CommandOrControl+Shift+S";
+const TOGGLE_SHORTCUT = "CommandOrControl+Shift+H"; // Manually hide/show the window
 let win: BrowserWindow | null = null;
+
+// Must run BEFORE app is ready, or the switches are ignored.
+// The window runs hidden and never paints to screen, so the GPU/disk cache
+// buys us nothing — disabling it silences the Windows "cache: Access is denied"
+// and "Gpu Cache Creation failed" noise (common when running from a
+// OneDrive-synced folder like Desktop).
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+app.commandLine.appendSwitch("disable-gpu-disk-cache");
 
 function createWindow() {
   win = new BrowserWindow({
     width: 1100,
     height: 760,
     title: "Prep Copilot",
-    show: false, // Stealth mode: runs silently in the background
+    show: true, // Visible on launch; hide manually with Ctrl/Cmd+Shift+H
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false, // keep realtime/timers alive while hidden
     },
   });
 
@@ -28,7 +33,11 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
 }
 
-/** Screenshot of the display the cursor is on, uploads to Supabase matching SQL security policies. */
+/**
+ * Grab a PNG of the display the cursor is on and return it as base64.
+ * Uploading is done in the renderer, which holds the logged-in Supabase
+ * session — the main process is never authenticated.
+ */
 async function captureScreen(): Promise<string> {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { width, height } = display.size;
@@ -40,71 +49,31 @@ async function captureScreen(): Promise<string> {
   const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
   if (!source) throw new Error("No screen available to capture");
 
-  const imageBuffer = source.thumbnail.toPNG();
-  await uploadCaptureToSupabase(imageBuffer);
-
-  return imageBuffer.toString("base64");
-}
-
-async function uploadCaptureToSupabase(imageBuffer: Buffer) {
-  try {
-    // 1. Get the currently active user session
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session?.user) {
-      console.error("Desktop app session missing. Please log in first.");
-      return;
-    }
-
-    const userId = session.user.id;
-    const fileName = `stealth_${Date.now()}.png`;
-    // 2. Strict storage path matching your SQL RLS policy: bucket_id = 'captures', folder = userId
-    const storagePath = `${userId}/${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("captures")
-      .upload(storagePath, imageBuffer, { contentType: "image/png" });
-
-    if (uploadError) throw uploadError;
-
-    // 3. Insert item explicitly including user_id and source: 'desktop' to satisfy constraints
-    const { error: insertError } = await supabase.from("items").insert({
-      user_id: userId,
-      image_path: storagePath,
-      prompt: "Live stealth capture from laptop workspace.",
-      status: "pending",
-      source: "desktop",
-    });
-
-    if (insertError) throw insertError;
-  } catch (err) {
-    console.error("Failed to upload stealth capture:", err);
-  }
-}
-
-function setupRemoteTriggers() {
-  // Listens for remote capture broadcasts sent from your phone's floating button
-  supabase
-    .channel("desktop-commands")
-    .on("broadcast", { event: "trigger_capture" }, async () => {
-      try {
-        await captureScreen();
-      } catch (e) {
-        console.error("Remote capture failed:", e);
-      }
-    })
-    .subscribe();
+  return source.thumbnail.toPNG().toString("base64");
 }
 
 ipcMain.handle("capture-screen", () => captureScreen());
+ipcMain.handle("hide-window", () => win?.hide());
 
 app.whenReady().then(() => {
-  // Suppress harmless Windows GPU cache lock error noise
-  app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+  // Allow microphone access (for voice input in mock interviews).
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === "media");
+  });
 
   createWindow();
-  setupRemoteTriggers();
 
-  // Global Hotkey: capture screen silently in the background
+  // Global Hotkey: manually toggle the window between hidden and visible
+  globalShortcut.register(TOGGLE_SHORTCUT, () => {
+    if (!win) return createWindow();
+    if (win.isVisible()) win.hide();
+    else {
+      win.show();
+      win.focus();
+    }
+  });
+
+  // Global Hotkey: capture the screen and hand it to the (authenticated) renderer
   globalShortcut.register(CAPTURE_SHORTCUT, async () => {
     try {
       const png = await captureScreen();
