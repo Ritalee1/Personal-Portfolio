@@ -7,7 +7,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
-header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; flex-wrap: wrap; }
 header nav { display: flex; gap: 4px; flex: 1; }
 main { max-width: 820px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
